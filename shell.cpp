@@ -26,10 +26,10 @@ private:
 
     void do_connect(){
         asio::connect(socket_, endpoints_);
-        do_write();
+        do_read();
     }
 
-    void do_write(){
+    /* void do_write(){
         auto self(shared_from_this());
         std::string imessage{"test_message"};
         std::cout << "Writing message " << imessage << std::endl;
@@ -39,14 +39,14 @@ private:
             std::cout << "Message sent" << std::endl;
             do_read();
         });
-    }
+    } */
 
     void do_read(){
         auto self(shared_from_this());
         socket_.async_read_some(asio::buffer(buffer_),
         [this, self](asio::error_code, std::size_t bytes_transfered){
-            message_.assign(buffer_.data(), bytes_transfered);
-            std::cout << "Recieved message: " << message_ << std::endl;
+            std::cout.write(buffer_.data(), bytes_transfered) << std::flush;
+            do_read();
         });
     }
 

